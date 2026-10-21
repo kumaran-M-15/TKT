@@ -1,3 +1,6 @@
+import random
+from django.utils import timezone
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 
@@ -44,3 +47,20 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.phone
+
+
+
+class OTP(models.Model):
+    phone = models.CharField(max_length=15, db_index=True)
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    used = models.BooleanField(default=False)
+
+    @staticmethod
+    def generate(phone):
+        code = f"{random.randint(0, 999999):06d}"
+        return OTP.objects.create(phone=phone, code=code)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=5)
