@@ -110,3 +110,30 @@ def cancel_booking(user, booking_id):
     b.save(update_fields=["status"])
     b.items.update(is_active=False)                                # seats free immediately, no strike
     return b
+
+
+@transaction.atomic
+def confirm_payment(staff, booking_id, mode):
+    """Counter staff marks a held booking as paid (cash/UPI). Single use."""
+    if mode not in ("CASH", "UPI"):
+        raise BookingError("Payment mode must be CASH or UPI")
+    try:
+        b = (Booking.objects.select_for_update(of=("self",))
+             .select_related("show__screen")
+             .get(pk=booking_id))
+    except Booking.DoesNotExist:
+        raise BookingError("Booking not found", 404)
+
+    if b.show.screen.theatre_id != staff.theatre_id:
+        raise BookingError("This booking is for a different theatre", 403)
+    if b.status != Booking.HELD:
+        raise BookingError(f"Booking is already {b.status.lower()}", 409)
+    if b.hold_expires_at <= timezone.now():
+        raise BookingError("Hold has expired", 410)
+
+    b.status = Booking.CONFIRMED
+    b.confirmed_at = timezone.now()
+    b.confirmed_by = staff
+    b.payment_mode = mode
+    b.save(update_fields=["status", "confirmed_at", "confirmed_by", "payment_mode"])
+    return b
