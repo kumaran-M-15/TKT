@@ -1,7 +1,8 @@
-import random
-from django.utils import timezone
+import secrets
 from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 
 
@@ -38,6 +39,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=20, choices=ROLES, default="CUSTOMER")
     strike_count = models.PositiveSmallIntegerField(default=0)
     blocked_until = models.DateTimeField(null=True, blank=True)
+
+    # For counter staff / managers: the theatre they work at
+    theatre = models.ForeignKey(
+        "theatres.Theatre", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="staff", help_text="For counter staff / managers")
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -49,7 +56,6 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.phone
 
 
-
 class OTP(models.Model):
     phone = models.CharField(max_length=15, db_index=True)
     code = models.CharField(max_length=6)
@@ -59,7 +65,7 @@ class OTP(models.Model):
 
     @staticmethod
     def generate(phone):
-        code = f"{random.randint(0, 999999):06d}"
+        code = f"{secrets.randbelow(1_000_000):06d}"   # cryptographically secure
         return OTP.objects.create(phone=phone, code=code)
 
     def is_expired(self):
