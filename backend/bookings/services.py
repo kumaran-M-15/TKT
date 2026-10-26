@@ -65,10 +65,18 @@ def hold_seats(user, show_id, seat_ids):
         raise BookingError("Show not found", 404)
 
     theatre = show.screen.theatre
-    if show.is_cancelled or not theatre.is_active:
-        raise BookingError("This show is not available", 409)
-    if now >= show.start_time - timedelta(minutes=theatre.booking_close_minutes):
-        raise BookingError("Online holds are closed for this show. Please book at the counter.", 409)
+    if not theatre.is_active:
+        raise BookingError("This theatre is not available", 409)
+
+    # Booking window is controlled by theatre staff / admin
+    state = show.booking_state(now)
+    if state != "OPEN":
+        raise BookingError({
+            "CANCELLED": "This show has been cancelled.",
+            "ENDED": "Online holds are closed for this show. Please book at the counter.",
+            "CLOSED": "Booking for this show is closed. Please wait for the theatre to open it again.",
+            "NOT_OPEN": "Booking for this show has not opened yet. The theatre will open it soon.",
+        }[state], 409)
 
     hold_expires_at = show.start_time - timedelta(minutes=theatre.hold_cutoff_minutes)
     if hold_expires_at <= now:

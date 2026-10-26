@@ -24,6 +24,8 @@ class Theatre(models.Model):
     booking_close_minutes = models.PositiveSmallIntegerField(
         default=60, help_text="No new holds within this many minutes of showtime")
     max_holds_per_user = models.PositiveSmallIntegerField(default=2)
+    auto_open_days = models.PositiveSmallIntegerField(
+        default=0, help_text="Shows starting within this many days open for booking automatically. 0 = staff open shows manually")
 
     def __str__(self):
         return f"{self.name}, {self.city}"
@@ -41,12 +43,14 @@ class Screen(models.Model):
 
 
 class Seat(models.Model):
-    TYPES = [("STANDARD", "Standard"), ("PREMIUM", "Premium"), ("RECLINER", "Recliner")]
-
     screen = models.ForeignKey(Screen, on_delete=models.CASCADE, related_name="seats")
     row_label = models.CharField(max_length=3)
     number = models.PositiveSmallIntegerField()
-    seat_type = models.CharField(max_length=10, choices=TYPES, default="STANDARD")
+    col = models.PositiveSmallIntegerField(
+        default=0, help_text="Grid column. Gaps between column numbers are aisles")
+    seat_type = models.CharField(
+        max_length=30, default="STANDARD",
+        help_text="Section name, such as DELUXE, STANDARD or BUDGET. Must match a ShowPrice seat type")
 
     class Meta:
         unique_together = ("screen", "row_label", "number")

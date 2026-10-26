@@ -1,0 +1,27 @@
+<%- include('partials/head') %>
+<h2>Now showing</h2>
+<div id="list" class="pgrid">Loading...</div>
+<%- include('partials/foot') %>
+<script>
+(async () => {
+  const list = document.getElementById('list');
+  try {
+    const movies = await api('/movies/');
+    if (!movies.length) { list.textContent = 'No shows available right now.'; return; }
+    list.innerHTML = '';
+    for (const m of movies) {
+      const a = document.createElement('a');
+      a.className = 'pcard'; a.href = '/movie/' + m.id;
+      let art;
+      if (m.poster) {
+        art = document.createElement('img'); art.src = m.poster; art.alt = m.title;
+        art.onerror = () => { const n = document.createElement('div'); n.className = 'pnone'; n.textContent = m.title[0]; art.replaceWith(n); };
+      } else { art = document.createElement('div'); art.className = 'pnone'; art.textContent = m.title[0]; }
+      const t = document.createElement('b'); t.textContent = m.title;
+      const s = document.createElement('small'); s.textContent = [m.certificate, m.language, m.genre].filter(Boolean).join(' | ');
+      a.append(art, t, s); list.appendChild(a);
+    }
+  } catch (e) { list.textContent = e.message; }
+})();
+</script>
+</body></html>

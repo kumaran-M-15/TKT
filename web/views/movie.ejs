@@ -1,0 +1,26 @@
+<%- include('partials/head') %>
+<div class="hero" id="hero">Loading...</div>
+<%- include('partials/foot') %>
+<script>
+const movieId = '<%= movieId %>';
+(async () => {
+  const hero = document.getElementById('hero');
+  try {
+    const m = await api('/movies/' + movieId + '/');
+    hero.innerHTML = '';
+    let art;
+    if (m.poster) { art = document.createElement('img'); art.src = m.poster; art.className = 'bigposter';
+      art.onerror = () => art.replaceWith(Object.assign(document.createElement('div'), { className: 'bigposter pnone', textContent: m.title[0] })); }
+    else art = Object.assign(document.createElement('div'), { className: 'bigposter pnone', textContent: m.title[0] });
+    const info = document.createElement('div');
+    info.innerHTML = '<h1></h1><div class="chips"></div><p class="desc"></p><a href="/movie/' + movieId + '/shows"><button>Book tickets</button></a>';
+    info.querySelector('h1').textContent = m.title;
+    const h = Math.floor(m.duration_minutes / 60), mi = m.duration_minutes % 60;
+    [h + 'h ' + mi + 'm', m.genre, m.certificate, m.language].filter(Boolean).forEach((c) => {
+      const s = document.createElement('span'); s.textContent = c; info.querySelector('.chips').appendChild(s); });
+    info.querySelector('.desc').textContent = m.description || '';
+    hero.append(art, info);
+  } catch (e) { hero.textContent = e.message; }
+})();
+</script>
+</body></html>

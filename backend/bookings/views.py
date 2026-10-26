@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from . import services
+from .emails import send_ticket_email
 from .models import Booking
 from .services import BookingError
 
@@ -12,6 +13,7 @@ from .services import BookingError
 class HoldSerializer(serializers.Serializer):
     show_id = serializers.IntegerField()
     seat_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1, max_length=20)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
 
 def _load(**filters):
@@ -47,8 +49,15 @@ def hold(request):
         b = services.hold_seats(request.user, s.validated_data["show_id"], s.validated_data["seat_ids"])
     except BookingError as e:
         return Response({"error": e.message}, status=e.status)
-    except IntegrityError:    # DB unique index caught a race we somehow missed
+    except IntegrityError:
         return Response({"error": "Seat just taken. Please choose different seats."}, status=409)
+
+    email = s.validated_data.get("email")
+    if email and request.user.email != email:
+        request.user.email = email
+        request.user.save(update_fields=["email"])
+
+    send_ticket_email(b.pk, "HELD")      # background thread, never blocks or breaks the booking
     return Response(booking_dict(_load(pk=b.pk).get()), status=201)
 
 

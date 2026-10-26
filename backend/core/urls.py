@@ -15,25 +15,31 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
 
+from bookings import ticket_views
 from counter import views as counter_views
+
 
 def health(request):
     return JsonResponse({"status": "ok"})
+
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", health),
     path("api/auth/", include("accounts.urls")),
 
-    # QR routes must come BEFORE the bookings include
-    path("api/bookings/<uuid:booking_id>/qr/", counter_views.booking_qr),
+    # these must come BEFORE the bookings include
+    path("api/bookings/<uuid:booking_id>/qr/", ticket_views.booking_qr),
+    path("api/bookings/<uuid:booking_id>/ticket.png", ticket_views.booking_ticket),
     path("api/bookings/<uuid:booking_id>/qr-token/", counter_views.booking_qr_token),
 
     path("api/bookings/", include("bookings.urls")),
     path("api/counter/", include("counter.urls")),
     path("api/", include("shows.urls")),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

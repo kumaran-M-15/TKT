@@ -22,14 +22,16 @@ def send_otp(request):
     s.is_valid(raise_exception=True)
     phone = s.validated_data["phone"]
 
-    # max 5 OTPs per phone per hour
     recent = OTP.objects.filter(phone=phone, created_at__gte=timezone.now() - timedelta(hours=1)).count()
     if recent >= 5:
         return Response({"error": "Too many OTP requests. Try again later."}, status=429)
 
     otp = OTP.generate(phone)
-    print(f"\n=== DEV OTP for {phone}: {otp.code} ===\n")   # replace with SMS (MSG91/Twilio) later
-    return Response({"message": "OTP sent"})
+    print(f"\n=== DEV OTP for {phone}: {otp.code} ===\n")   # replace with SMS later
+
+    # only a yes/no: ask for a name only if this phone has no saved name
+    needs_name = not User.objects.filter(phone=phone).exclude(name="").exists()
+    return Response({"message": "OTP sent", "needs_name": needs_name})
 
 
 @api_view(["POST"])
@@ -53,8 +55,9 @@ def verify_otp(request):
     otp.save(update_fields=["used"])
 
     user, created = User.objects.get_or_create(phone=phone)
-    if created or (s.validated_data.get("name") and not user.name):
-        user.name = s.validated_data.get("name", user.name)
+    name = (s.validated_data.get("name") or "").strip()
+    if name and not user.name:                     # saved once, in the database
+        user.name = name
         user.save(update_fields=["name"])
 
     refresh = RefreshToken.for_user(user)

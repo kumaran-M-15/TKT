@@ -1,0 +1,189 @@
+<%- include('partials/head') %>
+<div class="seathead">
+  <div id="head">Loading...</div>
+  <button class="alt" id="qtybtn">2 Tickets</button>
+</div>
+<div class="strip" id="strip"></div>
+<div class="note" id="note"></div>
+<div class="err" id="msg"></div>
+
+<div class="zoom"><button class="alt" id="zin">+</button><button class="alt" id="zout">-</button></div>
+<div id="hall" class="hall"></div>
+<div class="screen">SCREEN THIS WAY</div>
+<div class="legend"><span><i></i>Available</span><span><i class="t"></i>Sold</span><span><i class="s"></i>Selected</span></div>
+
+<div class="bar">
+  <div id="barinfo">Select seats</div>
+  <button id="hold" disabled>Hold seats</button>
+</div>
+<div style="height:80px"></div>
+<%- include('partials/foot') %>
+<script>
+const showId = '<%= showId %>';
+const $ = (id) => document.getElementById(id);
+const MAXQ = 6;
+const tm = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+let qty = Number(new URLSearchParams(location.search).get('qty')) || 0;
+let selected = new Map(), prices = {}, bookable = false, data = null, zoom = 1;
+
+function modal(html) {
+  closeModal();
+  const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.id = 'mbg';
+  bg.innerHTML = '<div class="modal">' + html + '</div>';
+  document.body.appendChild(bg); return bg.firstChild;
+}
+function closeModal() { const m = $('mbg'); if (m) m.remove(); }
+
+function updateBar() {
+  let total = 0; const names = [];
+  selected.forEach((s) => { total += Number(prices[s.type]); names.push(s.name); });
+  $('barinfo').textContent = selected.size
+    ? names.join(', ') + '  (' + selected.size + '/' + qty + ')'
+    : 'Select ' + qty + ' seat' + (qty > 1 ? 's' : '');
+  $('hold').textContent = 'Hold seats Rs ' + total.toFixed(2);
+  $('hold').disabled = selected.size !== qty || !bookable;
+  $('qtybtn').textContent = qty + (qty > 1 ? ' Tickets' : ' Ticket');
+}
+
+function askQty() {
+  let q = qty || 2;
+  const m = modal('<h3 style="text-align:center">How many seats?</h3><div class="qty" id="qty"></div><div class="plist" id="plist"></div><button id="qok" style="width:100%">Select seats</button>');
+  const box = m.querySelector('#qty');
+  for (let i = 1; i <= MAXQ; i++) {
+    const b = document.createElement('button'); b.className = 'qn' + (i === q ? ' on' : ''); b.textContent = i;
+    b.onclick = () => { q = i; [...box.children].forEach((c) => c.classList.toggle('on', Number(c.textContent) === i)); };
+    box.appendChild(b);
+  }
+  data.sections.forEach((s) => {
+    const free = s.rows.reduce((n, r) => n + r.seats.filter((x) => x.status === 'AVAILABLE').length, 0);
+    const d = document.createElement('div');
+    d.innerHTML = '<small></small><b></b><em></em>';
+    d.querySelector('small').textContent = s.name; d.querySelector('b').textContent = 'Rs ' + s.price;
+    d.querySelector('em').textContent = free ? 'AVAILABLE' : 'SOLD OUT';
+    m.querySelector('#plist').appendChild(d);
+  });
+  m.querySelector('#qok').onclick = () => {
+    qty = q; closeModal();
+    while (selected.size > qty) selected.delete([...selected.keys()].pop());
+    history.replaceState(null, '', '?qty=' + qty); drawHall(); updateBar();
+  };
+}
+
+function header(d) {
+  const day = new Date(d.start_time).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  $('head').innerHTML = '<h3></h3><div style="color:#9a9ab5"></div>';
+  $('head').querySelector('h3').textContent = d.movie + ' (' + d.language + ')';
+  $('head').lastChild.textContent = d.theatre + ' | ' + day + ' | ' + tm(d.start_time);
+  const strip = $('strip'); strip.innerHTML = '';
+  d.siblings.forEach((s) => {
+    const a = document.createElement('a'); a.href = '/shows/' + s.id + '?qty=' + (qty || 2);
+    a.className = 'chip' + (s.id === d.show_id ? ' on' : '') + (s.state === 'OPEN' ? '' : ' off');
+    a.textContent = tm(s.start_time); strip.appendChild(a);
+  });
+  $('note').textContent = 'Pay at the counter before ' + tm(d.pay_at_counter_before) + ' or your seats are released. No booking fee.';
+}
+
+function drawHall() {
+  const hall = $('hall'); hall.innerHTML = '';
+  hall.style.setProperty('--cols', data.cols); hall.style.setProperty('--z', zoom);
+  for (const sec of data.sections) {
+    const box = document.createElement('div'); box.className = 'section';
+    const h = document.createElement('h4'); h.textContent = 'Rs ' + sec.price + ' ' + sec.name; box.appendChild(h);
+    for (const row of sec.rows) {
+      const r = document.createElement('div'); r.className = 'srow';
+      const lab = document.createElement('span'); lab.className = 'label'; lab.textContent = row.label;
+      const cells = document.createElement('div'); cells.className = 'cells';
+      for (const s of row.seats) {
+        const taken = s.status === 'TAKEN';
+        if (taken) selected.delete(s.id);
+        const b = document.createElement('button');
+        b.className = 'seat' + (taken ? ' TAKEN' : '') + (selected.has(s.id) ? ' sel' : '');
+        b.style.gridColumn = s.col + 1; b.textContent = s.number;
+        b.title = row.label + s.number + ' | Rs ' + sec.price; b.disabled = taken;
+        b.onclick = () => {
+          if (selected.has(s.id)) { selected.delete(s.id); b.classList.remove('sel'); $('msg').textContent = ''; }
+          else {
+            if (!qty) { askQty(); return; }
+            if (selected.size >= qty) { $('msg').textContent = 'You chose ' + qty + ' seat' + (qty > 1 ? 's' : '') + '. Change the number of tickets to pick more.'; return; }
+            selected.set(s.id, { name: row.label + s.number, type: sec.name }); b.classList.add('sel'); $('msg').textContent = '';
+          }
+          updateBar();
+        };
+        cells.appendChild(b);
+      }
+      r.append(lab, cells); box.appendChild(r);
+    }
+    hall.appendChild(box);
+  }
+}
+
+async function load(first) {
+  data = await api('/shows/' + showId + '/seats/');
+  prices = data.prices; bookable = data.bookable;
+  header(data); drawHall(); updateBar();
+  const why = { NOT_OPEN: 'Booking for this show has not opened yet. The theatre will open it soon.',
+    CLOSED: 'Booking for this show is closed. Please wait for the theatre to open it again.',
+    ENDED: 'Online holds are closed for this show. Please book at the counter.',
+    CANCELLED: 'This show has been cancelled.' };
+  if (!bookable) $('msg').textContent = why[data.state] || 'Booking is closed.';
+  if (first && !qty && bookable) askQty();
+}
+
+// ---- hold flow: terms -> contact -> submit ----
+function terms() {
+  const by = tm(data.pay_at_counter_before);
+  const m = modal('<h3>Terms &amp; Conditions</h3><div class="terms">' +
+    '<p><b>Pay at the counter.</b> Your seats are held for you, not paid for. Show the QR or booking code at the theatre counter and pay the counter price before <b>' + by + '</b>.</p>' +
+    '<ol><li>There is no booking fee, convenience fee or online charge. You pay exactly the counter price.</li>' +
+    '<li>If you do not pay before the time above, the seats are released and it counts as an unpaid hold.</li>' +
+    '<li>Repeated unpaid holds pause pay-at-counter booking on your account for 15 days.</li>' +
+    '<li>You can cancel a hold for free at any time before it expires.</li>' +
+    '<li>The theatre may cancel or reschedule a show. Held seats are then released with no penalty to you.</li>' +
+    '<li>Outside food and beverages are not allowed. Ticket required for children 3 years and above.</li></ol></div>' +
+    '<div class="mbtns"><button class="alt" id="tc">Cancel</button><button id="ta">Accept</button></div>');
+  m.querySelector('#tc').onclick = closeModal;
+  m.querySelector('#ta').onclick = contact;
+}
+
+function contact() {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const m = modal('<h3>Contact details</h3>' +
+    '<label>Your email *</label><input id="cemail" type="email" placeholder="eg: abc@gmail.com">' +
+    '<small class="hint">Your booking confirmation is sent to this email.</small>' +
+    '<label>Mobile number *</label><input id="cphone" readonly>' +
+    '<small class="hint">This is the number you logged in with. It is used to identify you at the counter.</small>' +
+    '<div class="err" id="cerr"></div>' +
+    '<div class="mbtns"><button class="alt" id="cb">Back</button><button id="cs" disabled>Submit</button></div>');
+  const email = m.querySelector('#cemail'), btn = m.querySelector('#cs');
+  email.value = localStorage.getItem('email') || '';
+  m.querySelector('#cphone').value = user.phone || '';
+  const ok = () => { btn.disabled = !/^\S+@\S+\.\S+$/.test(email.value.trim()); };
+  email.oninput = ok; ok();
+  m.querySelector('#cb').onclick = terms;
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Holding...';
+    try {
+      await api('/bookings/hold/', { method: 'POST',
+        body: { show_id: Number(showId), seat_ids: [...selected.keys()], email: email.value.trim() } });
+      localStorage.setItem('email', email.value.trim());
+      location.href = '/tickets';
+    } catch (e) {
+      m.querySelector('#cerr').textContent = e.message;
+      btn.textContent = 'Submit'; ok();
+      selected.clear(); load(false);
+    }
+  };
+}
+
+$('hold').onclick = () => {
+  if (!token()) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); return; }
+  terms();
+};
+$('qtybtn').onclick = () => data && askQty();
+$('zin').onclick = () => { zoom = Math.min(2, zoom + 0.25); $('hall').style.setProperty('--z', zoom); };
+$('zout').onclick = () => { zoom = Math.max(0.6, zoom - 0.25); $('hall').style.setProperty('--z', zoom); };
+
+load(true).catch((e) => $('head').textContent = e.message);
+setInterval(() => load(false).catch(() => {}), 20000);
+</script>
+</body></html>

@@ -1,0 +1,66 @@
+<%- include('partials/head') %>
+<h2 id="title">Loading...</h2>
+<div class="dates" id="dates"></div>
+<div id="theatres"></div>
+<div class="legend"><span><i style="border-color:#3ecf8e"></i>Booking open</span><span><i style="border-color:#777"></i>Opens soon / closed</span></div>
+<%- include('partials/foot') %>
+<script>
+const movieId = '<%= movieId %>';
+const key = (d) => new Date(d).toLocaleDateString('en-CA');
+const tm = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+let byDate = {}, active = null;
+
+function renderTheatres() {
+  const box = document.getElementById('theatres'); box.innerHTML = '';
+  const list = byDate[active] || [];
+  if (!list.length) { box.innerHTML = '<div class="card">No shows on this date.</div>'; return; }
+  const groups = {};
+  list.forEach((s) => { (groups[s.theatre.id] ||= { t: s.theatre, shows: [] }).shows.push(s); });
+  Object.values(groups).forEach((g) => {
+    const card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = '<b></b><div class="addr"></div><div class="tbtns"></div>';
+    card.querySelector('b').textContent = g.t.name;
+    card.querySelector('.addr').textContent = g.t.address || '';
+    const row = card.querySelector('.tbtns');
+    g.shows.forEach((s) => {
+      const a = document.createElement('a'); a.href = '/shows/' + s.id;
+      const open = s.state === 'OPEN';
+      a.className = 'tbtn' + (open ? '' : ' off');
+      const prices = Object.values(s.prices).map(Number);
+      a.innerHTML = tm(s.start_time) + '<small></small>';
+      a.querySelector('small').textContent = open
+        ? (prices.length ? 'from Rs ' + Math.min(...prices) : 'Open')
+        : (s.state === 'NOT_OPEN' ? 'Opens soon' : 'Closed');
+      row.appendChild(a);
+    });
+    box.appendChild(card);
+  });
+}
+
+function renderDates() {
+  const box = document.getElementById('dates'); box.innerHTML = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const k = key(d), has = !!byDate[k];
+    const b = document.createElement('button');
+    b.className = 'dbtn' + (k === active ? ' on' : '') + (has ? '' : ' none');
+    b.innerHTML = '<small>' + d.toLocaleDateString([], { weekday: 'short' }).toUpperCase() + '</small><b>' + d.getDate() +
+      '</b><small>' + d.toLocaleDateString([], { month: 'short' }).toUpperCase() + '</small>';
+    b.disabled = !has;
+    b.onclick = () => { active = k; renderDates(); renderTheatres(); };
+    box.appendChild(b);
+  }
+}
+
+(async () => {
+  try {
+    const [m, shows] = await Promise.all([api('/movies/' + movieId + '/'), api('/movies/' + movieId + '/shows/')]);
+    document.getElementById('title').textContent = m.title + ' (' + m.language + ')';
+    shows.forEach((s) => { (byDate[key(s.start_time)] ||= []).push(s); });
+    const keys = Object.keys(byDate).sort();
+    active = keys[0] || key(new Date());
+    renderDates(); renderTheatres();
+  } catch (e) { document.getElementById('title').textContent = e.message; }
+})();
+</script>
+</body></html>

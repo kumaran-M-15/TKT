@@ -1,0 +1,55 @@
+<%- include('partials/head') %>
+<h2>My tickets</h2>
+<div id="list">Loading...</div>
+<%- include('partials/foot') %>
+<script>
+if (!token()) location.href = '/login?next=/tickets';
+
+async function qrUrl(id) { return URL.createObjectURL(await api('/bookings/' + id + '/qr/')); }
+
+async function download(b, btn) {
+  btn.disabled = true; btn.textContent = 'Preparing...';
+  try {
+    const blob = await api('/bookings/' + b.id + '/ticket.png');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'ticket-' + b.booking_code + '.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (e) { alert(e.message); }
+  btn.disabled = false; btn.textContent = 'Download ticket';
+}
+
+async function load() {
+  const list = document.getElementById('list');
+  const items = await api('/bookings/my/');
+  if (!items.length) { list.textContent = 'No bookings yet.'; return; }
+  list.innerHTML = '';
+  for (const b of items) {
+    const d = document.createElement('div'); d.className = 'card';
+    const t = new Date(b.show_time).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    let extra = '';
+    if (b.status === 'HELD') {
+      const by = new Date(b.pay_at_counter_before).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      extra = '<p><b>Show this QR at the counter and pay Rs ' + b.total_amount + ' before ' + by + '.</b></p>';
+    } else if (b.status === 'CONFIRMED') extra = '<p class="ok"><b>Paid. Valid for entry.</b></p>';
+    d.innerHTML = '<h3>' + b.movie + ' <span class="badge ' + b.status + '">' + b.status + '</span></h3>' +
+      '<div>' + b.theatre + ' | ' + b.screen + ' | ' + t + '</div>' +
+      '<div>Seats: ' + b.seats.join(', ') + ' | Rs ' + b.total_amount + '</div>' +
+      '<div>Code: <b>' + b.booking_code + '</b></div>' + extra;
+    if (b.status === 'HELD' || b.status === 'CONFIRMED') {
+      const img = document.createElement('img'); img.className = 'qr'; img.src = await qrUrl(b.id); d.appendChild(img);
+      const dl = document.createElement('button'); dl.textContent = 'Download ticket'; dl.style.marginRight = '8px';
+      dl.onclick = () => download(b, dl); d.appendChild(dl);
+    }
+    if (b.status === 'HELD') {
+      const c = document.createElement('button'); c.className = 'alt'; c.textContent = 'Cancel hold';
+      c.onclick = async () => { await api('/bookings/' + b.id + '/cancel/', { method: 'POST' }); load(); };
+      d.appendChild(c);
+    }
+    list.appendChild(d);
+  }
+}
+load().catch((e) => document.getElementById('list').textContent = e.message);
+setInterval(() => load().catch(() => {}), 15000);
+</script>
+</body></html>

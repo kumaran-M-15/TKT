@@ -1,0 +1,45 @@
+<%- include('partials/head') %>
+<div class="card" style="max-width:380px;margin:auto">
+  <h2>Login with phone</h2>
+  <div id="step1">
+    <input id="phone" placeholder="10-digit mobile number" maxlength="10" inputmode="numeric" autocomplete="tel">
+    <button id="send">Send OTP</button>
+  </div>
+  <div id="step2" style="display:none">
+    <input id="code" placeholder="6-digit OTP" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+    <div id="nameBox" style="display:none">
+      <input id="name" placeholder="Your name (first time only)" autocomplete="off">
+    </div>
+    <button id="verify">Verify</button>
+    <p class="note">Dev mode: the OTP is printed in the Django terminal.</p>
+  </div>
+  <div id="msg" class="err"></div>
+</div>
+<script src="/app.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const next = new URLSearchParams(location.search).get('next');
+let needsName = false;
+
+$('send').onclick = async () => {
+  try {
+    const r = await api('/auth/otp/send/', { method: 'POST', body: { phone: $('phone').value.trim() } });
+    needsName = !!r.needs_name;
+    $('nameBox').style.display = needsName ? 'block' : 'none';
+    $('step1').style.display = 'none'; $('step2').style.display = 'block'; $('msg').textContent = '';
+  } catch (e) { $('msg').textContent = e.message; }
+};
+
+$('verify').onclick = async () => {
+  const name = $('name').value.trim();
+  if (needsName && !name) { $('msg').textContent = 'Please enter your name'; return; }
+  try {
+    const d = await api('/auth/otp/verify/', { method: 'POST',
+      body: { phone: $('phone').value.trim(), code: $('code').value.trim(), name } });
+    setAuth(d);
+    const staff = ['COUNTER_STAFF', 'MANAGER'].includes(d.user.role);
+    location.href = (next && next.startsWith('/')) ? next : (staff ? '/staff' : '/');
+  } catch (e) { $('msg').textContent = e.message; }
+};
+</script>
+</body></html>

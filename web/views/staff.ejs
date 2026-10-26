@@ -1,0 +1,138 @@
+<%- include('partials/head') %>
+<h2>Counter</h2>
+<div class="card">
+  <div id="reader" style="max-width:340px"></div>
+  <div class="note" style="margin:8px 0">Hold the customer's QR 20-30 cm from the camera. If it will not scan, type the code below.</div>
+  <input id="code" placeholder="Or type the 8-character booking code" style="text-transform:uppercase" autocomplete="off">
+  <button id="lookup">Look up</button>
+  <div id="msg" class="err"></div>
+</div>
+<div id="result"></div>
+
+<h2>Manage shows</h2>
+
+<div class="card">
+  <b>Automatic opening</b>
+  <div class="note" style="margin:8px 0">Shows starting within this many days open for booking by themselves, including shows added later. Use 0 to open shows manually.</div>
+  Keep the next
+  <input id="autoDays" type="number" min="0" max="60" value="0" style="width:80px;display:inline-block">
+  days open
+  <button id="saveAuto">Save</button>
+  <div id="amsg" class="ok"></div>
+</div>
+
+<div class="card">
+  Open all shows of the next
+  <input id="days" type="number" min="1" max="60" value="7" style="width:80px;display:inline-block">
+  days
+  <button id="openAll">Open booking</button>
+  <button id="closeAll" class="alt">Close booking</button>
+  <div id="bmsg" class="ok"></div>
+</div>
+<div id="shows">Loading...</div>
+<%- include('partials/foot') %>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script>
+if (!token()) location.href = '/login';
+const $ = (id) => document.getElementById(id);
+const me = JSON.parse(localStorage.getItem('user') || '{}');
+let scanner, busy = false;
+
+function show(b) {
+  const t = new Date(b.show_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  $('result').innerHTML = '<div class="card"><h3>' + b.movie + ' | ' + t + ' <span class="badge ' + b.status + '">' + b.status + '</span></h3>' +
+    '<div>' + b.customer.name + ' (xxxx' + b.customer.phone_last4 + ')</div>' +
+    '<div>Seats: ' + b.seats.join(', ') + '</div>' +
+    (b.can_confirm
+      ? '<h2>Collect Rs ' + b.amount_to_collect + '</h2>' +
+        '<button id="cash">Cash received</button> <button id="upi" class="alt">UPI received</button>'
+      : '<p><b>' + (b.status === 'CONFIRMED' ? 'Already paid' : 'Cannot confirm: ' + b.status) + '</b></p>') + '</div>';
+  if (b.can_confirm) {
+    $('cash').onclick = () => confirmPay(b.booking_id, 'CASH');
+    $('upi').onclick = () => confirmPay(b.booking_id, 'UPI');
+  }
+}
+async function confirmPay(id, mode) {
+  try { show(await api('/counter/bookings/' + id + '/confirm/', { method: 'POST', body: { mode } })); $('msg').textContent = ''; }
+  catch (e) { $('msg').textContent = e.message; }
+}
+async function lookup(body) {
+  $('msg').textContent = '';
+  try { show(await api('/counter/scan/', { method: 'POST', body })); }
+  catch (e) { $('msg').textContent = e.message; }
+}
+$('lookup').onclick = () => {
+  const c = $('code').value.trim();
+  if (!c) { $('msg').textContent = 'Type the booking code or scan a QR first.'; return; }
+  lookup({ code: c });
+};
+$('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('lookup').click(); });
+
+scanner = new Html5Qrcode('reader', {
+  formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+  experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+  verbose: false,
+});
+scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 250, height: 250 } }, async (text) => {
+  if (busy) return;
+  busy = true;
+  text = (text || '').trim();
+  if (text) {
+    $('code').value = text.length <= 12 ? text.toUpperCase() : '';
+    await lookup(text.length <= 12 ? { code: text.toUpperCase() } : { token: text });
+  }
+  setTimeout(() => { busy = false; }, 2500);
+}, () => {}).catch(() => { $('reader').textContent = 'Camera not available. Use the booking code box.'; });
+
+// ---- manage shows ----
+const LABEL = { OPEN: 'Open', NOT_OPEN: 'Not open', CLOSED: 'Closed', ENDED: 'Ended', CANCELLED: 'Cancelled' };
+
+async function loadShows() {
+  const list = await api('/counter/shows/');
+  const box = $('shows'); box.innerHTML = '';
+  if (!list.length) { box.textContent = 'No upcoming shows.'; return; }
+  for (const s of list) {
+    const d = document.createElement('div'); d.className = 'card';
+    const t = new Date(s.start_time).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const until = s.booking_closes_at && s.state === 'OPEN'
+      ? ' (closes ' + new Date(s.booking_closes_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ')' : '';
+    d.innerHTML = '<b></b> | ' + s.screen + ' | ' + t + ' <span class="badge">' + LABEL[s.state] + until + '</span><div style="margin-top:8px"></div>';
+    d.querySelector('b').textContent = s.movie;
+    const row = d.lastElementChild;
+    const add = (text, cls, fn) => { const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls; b.style.marginRight = '6px'; b.onclick = fn; row.appendChild(b); };
+    const act = (id, action, extra) => api('/counter/shows/' + id + '/booking/', { method: 'POST', body: Object.assign({ action }, extra || {}) }).then(loadShows).catch((e) => $('bmsg').textContent = e.message);
+    if (s.state === 'OPEN') add('Close booking', 'alt', () => act(s.id, 'close'));
+    else if (s.state === 'NOT_OPEN' || s.state === 'CLOSED') {
+      add('Open until show', '', () => act(s.id, 'open'));
+      add('Open for 7 days', 'alt', () => act(s.id, 'open_days', { days: 7 }));
+    }
+    if (me.role === 'MANAGER' && s.state !== 'CANCELLED')
+      add('Cancel show', 'alt', async () => {
+        if (!confirm('Cancel this show? Held seats are released.')) return;
+        try { await api('/counter/shows/' + s.id + '/cancel/', { method: 'POST' }); loadShows(); }
+        catch (e) { $('bmsg').textContent = e.message; }
+      });
+    box.appendChild(d);
+  }
+}
+async function bulk(action) {
+  try {
+    const r = await api('/counter/shows/bulk-booking/', { method: 'POST', body: { action, days: Number($('days').value) } });
+    $('bmsg').textContent = r.updated + ' shows updated'; loadShows();
+  } catch (e) { $('bmsg').textContent = e.message; }
+}
+$('openAll').onclick = () => bulk('open');
+$('closeAll').onclick = () => bulk('close');
+
+api('/counter/auto-open/').then((r) => { $('autoDays').value = r.days; }).catch(() => {});
+$('saveAuto').onclick = async () => {
+  try {
+    const r = await api('/counter/auto-open/', { method: 'POST', body: { days: Number($('autoDays').value) } });
+    $('amsg').textContent = r.days ? 'Shows in the next ' + r.days + ' days now open automatically.' : 'Automatic opening is off.';
+    loadShows();
+  } catch (e) { $('amsg').textContent = e.message; }
+};
+
+loadShows().catch((e) => $('shows').textContent = e.message);
+</script>
+</body></html>
